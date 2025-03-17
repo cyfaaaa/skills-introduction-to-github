@@ -1,7 +1,7 @@
 <template>
  <el-form :inline="true" :model="formDate" class="demo-form-inline">
 
-    <el-form-item label="备注">
+    <el-form-item label="产品">
       <!-- 自动补全输入框 -->
       <el-autocomplete
         v-model="formDate.notes"
@@ -12,7 +12,7 @@
       />
     </el-form-item>
 
-    <el-form-item label="请选择到期时间">
+    <el-form-item label="设置到期时间">
     <!-- 时间选择器 -->
     <el-time-picker
     :editable="false"
@@ -22,22 +22,27 @@
     placeholder="Arbitrary time"
     />
     </el-form-item>
-    <!-- arrow-control -->
 
     <el-form-item>
       <el-button type="primary" @click="submit">Query</el-button>
     </el-form-item>
     
     <!-- 音频上传及播放 -->
-    <input type="file" accept="audio/*" @change="handleFileUpload" />
+    <input type="file" ref="fileInput" accept="audio/*" @change="handleFileUpload" />
     <audio class="audioer" @ended="handlePlayEnd" ref="audioPlayer" :src="audioSrc" controls></audio>
+
+    <el-button type="primary" @click="uploadButton">
+      Upload<el-icon class="el-icon--right"><Upload /></el-icon>
+    </el-button>
+    <el-button text>{{ fileName }}</el-button>
+
 
     <!-- Dialog  -->
     <el-dialog @close="" v-model="dialogTableVisible" title="oi~ 小鬼! 有产品要到期咯." width="800">
       <el-table :data="filterExpiredData" style="width:100%" border>
 
 
-      <el-table-column label="到期时间" style="width:25%">
+      <el-table-column label="到期时间" style="width:25%" height="350px">
         <template #default="scope">
           <div style="display: flex; align-items: center">
             <el-icon><timer /></el-icon>
@@ -62,7 +67,9 @@
 
 
     </el-table>
-    <el-button class="receiveButton" @click="receive" type="primary" plain>Yes,sir!</el-button>
+
+    <el-button class="receiveButton" @click="receive" type="primary" plain>Yes,Sir!</el-button>
+
   </el-dialog>
 
   </el-form>
@@ -78,26 +85,28 @@ import { onBeforeUnmount,computed,onMounted,reactive,ref } from 'vue'
 import alarmData from "@/stores/alarmData";
 import { ElMessageBox,ElMessage, ListCache } from 'element-plus'
 import dayjs from 'dayjs';
-import { Timer } from '@element-plus/icons-vue'
+import { Timer,Upload } from '@element-plus/icons-vue'
 
 const STORAGE_KEY = 'my_times_data'
 const restaurants = ref([])
 const teaName = ref('')
 const formDate = reactive({
-  id:null,
-  notes:teaName.value,
-  targetFormatTime:'',
-  ider:null,
+  id:null,                //target时间戳
+  notes:teaName.value,    //产品名称
+  targetFormatTime:'',    //targe格式化后的时间
+  ider:null,              //id
+  showBox:true,           //控制table里修改时间的样式
 })
 const listData = alarmData()
 //音频相关数据
 const audioSrc = ref(null);
-const audioPlayer = ref(null)
+const audioPlayer = ref()
+const fileName = ref('');
+const fileInput = ref(null)
 
 //定时器相关数据
 const playAlarm = ref()
-const playAudio = ref()
-let controlAudioPlay = ref(true)
+const currentTime = ref(Date.now())
 
 //alert提示框相关数据
 const dialogTableVisible = ref(false)
@@ -129,27 +138,33 @@ function submit(){
   
     if(formDate.id && formDate.notes){
       if(formDate.id - new Date().getTime() > 0){
-        if (audioPlayer.value){
+        if(audioSrc.value){
           formDate.targetFormatTime = dayjs(formDate.id).format('HH:mm:ss')
           formDate.ider = Date.now()
           //将数据推到Stores仓库listData.timesData里
           listData.timesData.push(JSON.parse(JSON.stringify(formDate)))
           //将listData.timesData里的数据存到本地
           saveTolocalStorage()
-        }else{
+          //成功添加数据给个添加成功的提示
           ElMessage({
           showClose: true,
-          message: '请上传音频!',
-          type: 'warning',
-      })
+          message: 'OK, 你已成功添加一条数据!',
+          type: 'success',
+          })
+        }else{
+          ElMessage({
+        showClose: true,
+        message: '要上传音频文件哦~, 小子!',
+        type: 'warning',
+        })
         }
-
+          
       }else{
         ElMessage({
         showClose: true,
-        message: '你小子! 输入时间不能小于当前时间! 偷奸耍滑!',
+        message: '你小子! 偷奸耍滑! 输入时间不能小于当前时间!',
         type: 'warning',
-      })
+        })
       }
     }else{
       ElMessage({
@@ -161,24 +176,27 @@ function submit(){
     }
     formDate.notes = ''
     listDataSort()
-
-    console.log(JSON.parse(localStorage.getItem(STORAGE_KEY)));
-    console.log(filterExpiredData.value);
-    
 }
 
 // 处理音频文件上传
 const handleFileUpload = (event) => {
   const file = event.target.files[0];
-  if (file && file.type.startsWith('audio/')) {
-    audioSrc.value = URL.createObjectURL(file);
-  }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64 = e.target.result;
+        if(base64 == 'string'){
+          localStorage.setItem('audioFile',base64);
+        } // 存储 Base64
+        audioSrc.value = base64; // 更新 audioUrl
+      };
+      reader.readAsDataURL(file); // 将文件转换为 Base64
+      fileName.value = file.name;
 };
 
 //把将要到期的数据提取出来
 const filterExpiredData = computed(() => 
   listData.timesData.filter((item,i)=>{
-    if(item.id - Date.now() <= 600000){
+    if(item.id - currentTime.value <= 600000){
       return item
     }
 })
@@ -197,11 +215,12 @@ const filterDidDidData = () => {
 
 //设置定时器,每隔一定时间执行一次代码
  playAlarm.value = setInterval(() => {
-  
+  console.log(currentTime.value);
+  currentTime.value = Date.now()
   //先将快要到期的数据展示出来并且循环播放音频
   if(filterExpiredData.value.length != 0){
     //show expire data
-    dialogTableVisible.value = true
+    dialogTableVisible.value = true;
     //play audio
     audioPlayer.value.play();
   }
@@ -211,8 +230,6 @@ const filterDidDidData = () => {
 
 //阻止定时器重复调用play函数,等音频播放完后才重新调用
 const handlePlayEnd = () => {
-
-
 }
 
 //Dialog内的收到按钮,点击后删除即将过期的数据,关闭音频播放
@@ -227,45 +244,40 @@ const receive = () => {
     }
   )
     .then(() => {  //这里是即将到期数据处理成功流程
-      listData.timesData.forEach((item,i) => {
-        filterExpiredData.value.forEach((value,j) => {
-          if(item.ider === value.ider){
-            listData.timesData.splice(i,1)
-            localStorage.removeItem(STORAGE_KEY)
-            localStorage.setItem(STORAGE_KEY,JSON.stringify(listData.timesData))
-          }
-        })
-      })
-      dialogTableVisible.value = false
+      const idsToRemove = filterExpiredData.value.map((item => item.ider))
+     
+      for(let i = listData.timesData.length -1; i >= 0; i--){
+        if(idsToRemove.includes(listData.timesData[i].ider)){
+          listData.timesData.splice(i,1)
+          localStorage.removeItem(STORAGE_KEY)
+          localStorage.setItem(STORAGE_KEY,JSON.stringify(listData.timesData))
+        }
+      }
+
+      // 处理成功后暂停音频播放
+      audioPlayer.value.pause();
+      
       ElMessage({
         type: 'success',
         message: '你是zhui棒的 ,你是zhui棒的!',
       })
+      //关闭蒙层
+      dialogTableVisible.value = false
     })
     .catch(() => {   //这里是即将到期数据处理失败流程
+      console.log(222);
       ElMessage({
         type: 'warning',
         message: '哎呦~你干嘛,AAAAAAA!',
       })
     })
-
-
  
 }
 
+
 //对listData数据进行排序
 const listDataSort = () => {
-  listData.timesData.forEach((item,i) => {
-    for(let j = i + 1;j < listData.timesData.length; j++){
-      if(item.id > listData.timesData[j]){
-        let temp = listData.timesData[j]
-        listData.timesData[j] = listData.timesData[i]
-        listData.timesData[i] = temp
-      }
-    }
-
-   
-  })
+  listData.timesData = [...listData.timesData].sort((a, b) => a.id - b.id);
 }
 
 const querySearch = (queryString,cb) => {
@@ -302,7 +314,9 @@ const loadAll = () => {
   ]
 }
 
-
+const uploadButton = () => {
+  fileInput.value.click()
+}
 
 
 onMounted(() => {
@@ -313,6 +327,12 @@ onMounted(() => {
   listDataSort()
   //删除已经过期的数据
   filterDidDidData()
+
+  const storedAudio = localStorage.getItem('audioFile'); // 读取 Base64
+      if (storedAudio) {
+        audioSrc.value = storedAudio; // 设置 audioUrl
+      }
+
 })
 
 onBeforeUnmount(() => {
@@ -379,15 +399,17 @@ interface RestaurantItem {
 
 .receiveButton{
   margin-top: 20px;
+  margin-left: 85%;
 }
 
 .audioer{
   display: none;
 }
 .el-statistic__number,.el-statistic__content,.el-statistic,.el-col{
-  width: 100%;
-  font-size: 18px;
+  width: 200px;
+  font-size: 16px;
   color: #F56C6C;
+  display: block;
 }
 .demo-form-inline{
   display: flex;
@@ -395,9 +417,14 @@ interface RestaurantItem {
 }
 
 /* 基础样式重置 */
-/* input[type="file"] {
+input[type="file"] {
   opacity: 0;
   position: absolute;
   z-index: -1;
-} */
+}
+
+.clearExpierButton{
+  margin-top: 20px;
+}
+
 </style>
